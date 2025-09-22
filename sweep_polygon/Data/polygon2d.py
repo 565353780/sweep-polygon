@@ -68,3 +68,61 @@ class Polygon2D(object):
             result_points.append(pt_3d)
 
         return np.array(result_points)
+
+    def queryNormals(self, t: np.ndarray) -> np.ndarray:
+        t = np.mod(t, 1.0)
+
+        vt_ext = np.hstack((self.vt, 1.0))
+        verts_ext = np.vstack([self.vertices, self.vertices[0]])
+
+        normals = []
+
+        for val in t:
+            # 找到对应的边索引
+            idx = np.searchsorted(vt_ext, val) - 1
+            idx = np.clip(idx, 0, len(self.vt) - 1)
+
+            # 判断是否与某个顶点重合（用一个容差，比如1e-8）
+            close_to_vertex = np.isclose(val, self.vt, atol=1e-8)
+            if np.any(close_to_vertex):
+                vertex_idx = np.argmax(close_to_vertex)
+                n = len(self.vertices)
+
+                # 计算前一条边方向向量
+                prev_idx = (vertex_idx - 1) % n
+                edge_prev = verts_ext[vertex_idx] - verts_ext[prev_idx]
+                edge_prev /= np.linalg.norm(edge_prev)
+
+                # 计算后一条边方向向量
+                next_idx = vertex_idx
+                edge_next = verts_ext[next_idx + 1] - verts_ext[next_idx]
+                edge_next /= np.linalg.norm(edge_next)
+
+                # 平均方向
+                direction = edge_prev + edge_next
+                norm = np.linalg.norm(direction)
+                if norm < 1e-12:
+                    # 极端情况，前后方向完全相反，直接用前方向
+                    direction = edge_prev
+                else:
+                    direction /= norm
+            else:
+                # 在边上，方向是该边向量
+                edge = verts_ext[idx + 1] - verts_ext[idx]
+                norm = np.linalg.norm(edge)
+                if norm == 0:
+                    # 边长为0，直接取零向量（或者其他处理）
+                    direction = np.array([0.0, 0.0])
+                else:
+                    direction = edge / norm
+
+            # 计算法线向量 [-y, x]
+            normal_2d = np.array([-direction[1], direction[0]])
+            normal_2d /= np.linalg.norm(normal_2d)  # 保证单位向量
+
+            # 转换成三维，z=0，考虑位置偏移
+            normal_3d = np.array([normal_2d[0], normal_2d[1], 0.0])
+
+            normals.append(normal_3d)
+
+        return np.array(normals)
