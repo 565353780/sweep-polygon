@@ -106,12 +106,16 @@ class Polygon2D(object):
         return True
 
     def query(self, t: np.ndarray) -> np.ndarray:
-        query_vn = self.query_func(t)
+        valid_t_idxs = np.where((t >= 0.0) & (t <= 1.0))
 
-        expand_vn = np.zeros([query_vn.shape[0], 6])
-        expand_vn[:, :2] = query_vn[:, :2]
-        expand_vn[:, :3] += self.position
-        expand_vn[:, 3:5] = query_vn[:, 2:]
+        valid_t = t[valid_t_idxs]
+
+        query_vn = self.query_func(valid_t)
+
+        expand_vn = np.zeros([t.shape[0], 6])
+        expand_vn[valid_t_idxs, :2] = query_vn[:, :2]
+        expand_vn[valid_t_idxs, :3] += self.position
+        expand_vn[valid_t_idxs, 3:5] = query_vn[:, 2:]
         return expand_vn
 
     def renderVertices(self, normal_length: float = 0.01) -> bool:

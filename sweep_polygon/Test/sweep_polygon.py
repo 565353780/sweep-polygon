@@ -71,7 +71,7 @@ def naca4_airfoil_polygon_sharp_trailing_edge(code: str, n_points=100):
 
 
 def test():
-    sample_resolution = 400
+    sample_resolution = 4000
 
     # 构建多边形
     vertices = naca4_airfoil_polygon_sharp_trailing_edge("2412", sample_resolution)
@@ -79,20 +79,21 @@ def test():
     sweep_polygon = SweepPolygon()
 
     sweep_polygon.addPolygon(vertices, [0, 0, 0])
-    sweep_polygon.polygons[0].renderVertices()
-    exit()
     sweep_polygon.addPolygon(vertices * 1.2, [1, 0, 4])
     sweep_polygon.addPolygon(vertices * 1.5, [1.2, 0, 8])
 
+    sweep_polygon.createLinearQueryFunc()
+
     # 均匀采样 t 并查询坐标
     ts = np.linspace(0, 1, sample_resolution, endpoint=False)
-    hs = np.linspace(0, 8, 1, endpoint=False)
+    hs = np.linspace(0, 8, 400, endpoint=False)
 
     t_h_array = np.array(np.meshgrid(ts, hs)).T.reshape(-1, 2)
 
-    sampled_points = sweep_polygon.queryPoints(t_h_array)
+    sample_vn = sweep_polygon.query(t_h_array)
 
-    sampled_normals = -1.0 * sweep_polygon.queryNormals(t_h_array)
+    sampled_points = sample_vn[:, :3]
+    sampled_normals = sample_vn[:, 3:]
 
     pcd = getPcd(sampled_points, sampled_normals)
 
