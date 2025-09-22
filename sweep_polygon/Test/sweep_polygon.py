@@ -1,10 +1,9 @@
-import os
 import numpy as np
 import open3d as o3d
 
 from sweep_polygon.Data.sweep_polygon import SweepPolygon
 from sweep_polygon.Method.io import saveAsWNNCNormalPcdFile
-from sweep_polygon.Method.render import cerateNormalLineSet, getPcd
+from sweep_polygon.Method.render import createNormalLineSet, getPcd
 
 
 def generate_ellipse_polygon(a, b, num_points=100):
@@ -14,85 +13,80 @@ def generate_ellipse_polygon(a, b, num_points=100):
     return np.stack((x, y), axis=1)
 
 
-def naca4_coordinates(m=0.02, p=0.4, t=0.12, c=1.0, n_points=50):
+def naca4_airfoil_polygon_sharp_trailing_edge(code: str, n_points=100):
     """
-    生成NACA 4位数翼型截面坐标
-    m: 最大弯度，0.02代表2%
-    p: 弯度位置，0.4代表40%
-    t: 厚度，0.12代表12%
-    c: 弦长，默认1.0
-    n_points: 顶点数(上下面总和)
+    生成NACA翼型闭合多边形顶点（尾缘厚度强制为0，尖锐尾缘）
 
-    返回：shape (n_points, 2) 顶点坐标数组[x,y]
+    code: 4位字符串，例如 '2412'
+    n_points: 上下表面各自采样点数（含端点）
+
+    返回：
+    points: (2*n_points-1, 2) ndarray，闭合多边形顶点
     """
+    if len(code) != 4 or not code.isdigit():
+        raise ValueError("NACA code must be a 4-digit string.")
 
-    # x分布，余弦分布更均匀，前缘点密集
-    beta = np.linspace(0, np.pi, n_points // 2)
-    x_upper = c * (0.5 * (1 - np.cos(beta)))
+    m = int(code[0]) / 100
+    p = int(code[1]) / 10
+    t = int(code[2:]) / 100
 
-    # 厚度分布方程(标准NACA公式)
-    yt = (
-        5
-        * t
-        * c
-        * (
-            0.2969 * np.sqrt(x_upper / c)
-            - 0.1260 * (x_upper / c)
-            - 0.3516 * (x_upper / c) ** 2
-            + 0.2843 * (x_upper / c) ** 3
-            - 0.1015 * (x_upper / c) ** 4
-        )
+    if p == 0:
+        p = 0.0001
+
+    x = np.linspace(0, 1, n_points)
+
+    # 厚度分布
+    yt = (t / 0.2) * (
+        0.2969 * np.sqrt(x) - 0.1260 * x - 0.3516 * x**2 + 0.2843 * x**3 - 0.1015 * x**4
     )
 
-    # 弯度线
-    yc = np.zeros_like(x_upper)
-    dyc_dx = np.zeros_like(x_upper)
-
-    for i, x in enumerate(x_upper):
-        if x < p * c:
-            yc[i] = m / (p**2) * (2 * p * (x / c) - (x / c) ** 2) * c
-            dyc_dx[i] = 2 * m / (p**2) * (p - x / c)
+    # 弦线中线
+    yc = np.zeros_like(x)
+    for i, xi in enumerate(x):
+        if xi <= p:
+            yc[i] = m / p**2 * (2 * p * xi - xi**2)
         else:
-            yc[i] = (
-                m / ((1 - p) ** 2) * ((1 - 2 * p) + 2 * p * (x / c) - (x / c) ** 2) * c
-            )
-            dyc_dx[i] = 2 * m / ((1 - p) ** 2) * (p - x / c)
+            yc[i] = m / (1 - p) ** 2 * ((1 - 2 * p) + 2 * p * xi - xi**2)
 
+    dyc_dx = np.gradient(yc, x)
     theta = np.arctan(dyc_dx)
 
-    # 上表面坐标
-    xu = x_upper - yt * np.sin(theta)
-    yu = yc + yt * np.cos(theta)
+    # 上表面点，x从尾缘到前缘逆序排列
+    xu = x[::-1]
+    yu = yc[::-1] + yt[::-1] * np.cos(theta[::-1])
+    xu = xu - yt[::-1] * np.sin(theta[::-1])
 
-    # 下表面坐标
-    xl = x_upper + yt * np.sin(theta)
+    # 下表面点，x从前缘到尾缘
+    xl = x
     yl = yc - yt * np.cos(theta)
+    xl = xl + yt * np.sin(theta)
 
-    # 合并，注意上下表面点序，使轮廓闭合（从后缘上表面 -> 前缘 -> 后缘下表面）
-    x_coords = np.concatenate([xu[::-1], xl[1:]])
-    y_coords = np.concatenate([yu[::-1], yl[1:]])
+    # 拼接闭合多边形顶点（避免重复尾缘点）
+    lower = np.vstack((xl[1:-1], yl[1:-1])).T
+    upper = np.vstack((xu, yu)).T
 
-    vertices = np.vstack([x_coords, y_coords]).T
-    return vertices
+    points = np.vstack((upper, lower))
+
+    return points
 
 
 def test():
-    sample_resolution = 20000
+    sample_resolution = 400
 
     # 构建多边形
-    vertices = naca4_coordinates(
-        m=0.02, p=0.4, t=0.12, c=1.0, n_points=sample_resolution
-    )
+    vertices = naca4_airfoil_polygon_sharp_trailing_edge("2412", sample_resolution)
 
     sweep_polygon = SweepPolygon()
 
     sweep_polygon.addPolygon(vertices, [0, 0, 0])
+    sweep_polygon.polygons[0].renderVertices()
+    exit()
     sweep_polygon.addPolygon(vertices * 1.2, [1, 0, 4])
     sweep_polygon.addPolygon(vertices * 1.5, [1.2, 0, 8])
 
     # 均匀采样 t 并查询坐标
-    ts = np.linspace(0, 1, 2000, endpoint=False)
-    hs = np.linspace(0, 8, 400, endpoint=False)
+    ts = np.linspace(0, 1, sample_resolution, endpoint=False)
+    hs = np.linspace(0, 8, 1, endpoint=False)
 
     t_h_array = np.array(np.meshgrid(ts, hs)).T.reshape(-1, 2)
 
@@ -102,7 +96,7 @@ def test():
 
     pcd = getPcd(sampled_points, sampled_normals)
 
-    normal_lineset = cerateNormalLineSet(sampled_points, sampled_normals, length=1.0)
+    normal_lineset = createNormalLineSet(sampled_points, sampled_normals, length=1.0)
 
     saveAsWNNCNormalPcdFile(pcd, "./output/sweep_polygon.ply", overwrite=True)
 

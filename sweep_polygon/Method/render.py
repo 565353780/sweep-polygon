@@ -20,7 +20,7 @@ def renderPoints(points: np.ndarray, normals: Union[np.ndarray, None] = None) ->
     return True
 
 
-def cerateNormalLineSet(points: np.ndarray, normals: np.ndarray, length=0.1):
+def createNormalLineSet(points: np.ndarray, normals: np.ndarray, length=0.1):
     """
     points: (N,3)
     normals: (N,3) 单位法线

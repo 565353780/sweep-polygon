@@ -1,12 +1,15 @@
 import numpy as np
+import open3d as o3d
 from typing import Union
+
+from sweep_polygon.Method.render import createNormalLineSet, getPcd
 
 
 class Polygon2D(object):
     def __init__(
         self, vertices: np.ndarray, position: Union[np.ndarray, list, None] = None
     ) -> None:
-        self.vertices = vertices  # 顶点二维坐标，形状(N, 2)
+        self.vertices = vertices
 
         if position is None:
             self.position = np.zeros(3)  # [x,y,z]
@@ -16,8 +19,64 @@ class Polygon2D(object):
                 raise ValueError("Position must be a 3-element array")
             self.position = position
 
+        self.normals = self.compute_vertex_normals()
+
         self.vt = np.empty(0)  # 顶点对应的参数化t
         self.update()
+
+    @property
+    def vertices3d(self) -> np.ndarray:
+        vertices = np.zeros([self.vertices.shape[0], 3])
+        vertices[:, :2] = self.vertices
+        vertices += self.position
+        return vertices
+
+    @property
+    def normals3d(self) -> np.ndarray:
+        normals = np.zeros([self.normals.shape[0], 3])
+        normals[:, :2] = self.normals
+        return normals
+
+    def compute_vertex_normals(self):
+        verts = self.vertices
+        N = verts.shape[0]
+        normals = np.zeros_like(verts)
+
+        for i in range(N):
+            v_prev = verts[(i - 1) % N]
+            v_curr = verts[i]
+            v_next = verts[(i + 1) % N]
+
+            e1 = v_curr - v_prev
+            e2 = v_next - v_curr
+
+            # 单位化
+            e1_norm = e1 / np.linalg.norm(e1)
+            e2_norm = e2 / np.linalg.norm(e2)
+
+            bisector = e1_norm + e2_norm
+            if np.allclose(bisector, 0):
+                # 两边共线，法线直接取垂直e1或e2
+                normal = np.array([-e1_norm[1], e1_norm[0]])
+            else:
+                # 法线为bisector的法线
+                normal = np.array([-bisector[1], bisector[0]])
+                normal /= np.linalg.norm(normal)
+
+            normals[i] = normal
+
+        # 可选：判断多边形顶点顺序，调整法线方向使其外指
+        if self.is_clockwise():
+            normals = -normals
+
+        return normals
+
+    def is_clockwise(self):
+        """判断多边形顶点顺序是否顺时针，常用面积法"""
+        verts = self.vertices
+        x = verts[:, 0]
+        y = verts[:, 1]
+        return np.sum((x[:-1] * y[1:] - x[1:] * y[:-1])) > 0
 
     def center(self) -> np.ndarray:
         # 用顶点均值作为中心，再加上位置偏移（x,y,z）
@@ -126,3 +185,13 @@ class Polygon2D(object):
             normals.append(normal_3d)
 
         return np.array(normals)
+
+    def renderVertices(self, normal_length: float = 0.01) -> bool:
+        vertices = self.vertices3d
+        normals = self.normals3d
+
+        pcd = getPcd(vertices, normals)
+        normal_line_set = createNormalLineSet(vertices, normals, normal_length)
+
+        o3d.visualization.draw_geometries([pcd, normal_line_set])
+        return True
